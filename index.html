@@ -3,681 +3,394 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>坦克大战 - Tank Battle</title>
+<title>坦克大战</title>
 <style>
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body {
-  background: #111;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  min-height: 100vh;
-  font-family: 'Microsoft YaHei', 'Courier New', monospace;
-  overflow: hidden;
-  flex-direction: column;
-}
-#wrap {
-  position: relative;
-  display: inline-block;
-}
-canvas {
-  display: block;
-  border: 3px solid #555;
-}
-#sidebar {
-  position: absolute;
-  top: 0;
-  right: -170px;
-  width: 160px;
-  color: #fff;
-  font-size: 14px;
-  padding: 10px;
-  background: rgba(0,0,0,0.5);
-  border: 1px solid #333;
-  border-radius: 6px;
-}
-#sidebar div { margin-bottom: 10px; }
-#sidebar .lbl { color: #888; font-size: 12px; }
-#sidebar .val { color: #ff0; font-size: 22px; font-weight: bold; }
-#overlay {
-  position: absolute;
-  top: 0; left: 0;
-  right: 0; bottom: 0;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-  background: rgba(0,0,0,0.88);
-  color: #fff;
-  z-index: 10;
-  cursor: pointer;
-}
-#overlay.hidden { display: none !important; }
-#overlay h1 { font-size: 40px; color: #ff0; margin-bottom: 8px; text-shadow: 3px 3px 8px #a00; }
-#overlay h2 { font-size: 28px; margin-bottom: 15px; }
-#overlay p { font-size: 16px; color: #bbb; margin: 5px 0; }
-.hint { font-size: 22px; color: #0f0; margin-top: 25px; animation: blink 0.8s infinite; }
-.ctrl { margin-top: 20px; }
-.ctrl p { font-size: 14px; color: #888; margin: 4px 0; }
-@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.2} }
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#000;display:flex;justify-content:center;align-items:center;min-height:100vh;font-family:monospace}
+canvas{display:block}
+#info{position:fixed;top:10px;right:20px;color:#ff0;font-size:18px;text-align:right}
+#info div{margin-bottom:8px}
+#info span{color:#888;font-size:14px}
+#msg{position:fixed;top:0;left:0;width:100%;height:100%;display:flex;flex-direction:column;justify-content:center;align-items:center;background:rgba(0,0,0,0.9);color:#fff;z-index:99;cursor:pointer}
+#msg.hidden{display:none}
+#msg h1{font-size:48px;color:#fc0;margin-bottom:10px}
+#msg p{font-size:16px;color:#aaa;margin:4px 0}
+#msg .go{font-size:24px;color:#0f0;margin-top:25px;animation:bl 1s infinite}
+@keyframes bl{0%,100%{opacity:1}50%{opacity:0.2}}
 </style>
 </head>
 <body>
 
-<div id="wrap">
-  <canvas id="game"></canvas>
-  <div id="sidebar">
-    <div><div class="lbl">关卡</div><div class="val" id="hudLevel">1</div></div>
-    <div><div class="lbl">得分</div><div class="val" id="hudScore">0</div></div>
-    <div><div class="lbl">生命</div><div class="val" id="hudLives">3</div></div>
-    <div><div class="lbl">敌人</div><div class="val" id="hudEnemies">0</div></div>
-  </div>
-  <div id="overlay">
-    <h1>坦克大战</h1>
-    <p>TANK BATTLE</p>
-    <div class="ctrl">
-      <p>[ 方向键 / WASD ] 移动</p>
-      <p>[ 空格键 ] 射击</p>
-      <p>[ P ] 暂停</p>
-    </div>
-    <p class="hint" id="startBtn">点击开始 / 按 ENTER</p>
-  </div>
+<canvas id="cv"></canvas>
+<div id="info">
+  <div><span>关卡</span><br><b id="hLv">1</b></div>
+  <div><span>得分</span><br><b id="hSc">0</b></div>
+  <div><span>生命</span><br><b id="hLi">3</b></div>
+  <div><span>敌人</span><br><b id="hEn">0</b></div>
+</div>
+<div id="msg" onclick="go()">
+  <h1>坦克大战</h1>
+  <p>[方向键/WASD] 移动 &nbsp; [空格] 射击 &nbsp; [P] 暂停</p>
+  <p class="go">点击开始游戏</p>
 </div>
 
 <script>
-(function() {
-  "use strict";
+var cv=document.getElementById('cv');
+var c=cv.getContext('2d');
 
-  /* ===== CONFIG ===== */
-  var TILE = 24, COLS = 26, ROWS = 26;
-  var W = COLS * TILE, H = ROWS * TILE;
-  var EMPTY=0, BRICK=1, STEEL=2, WATER=3, TREE=4, BASE=5;
+// 26x26 grid, 24px tiles
+var T=24, N=26;
+cv.width=N*T; cv.height=N*T;
 
-  /* ===== CANVAS ===== */
-  var canvas = document.getElementById('game');
-  var ctx = canvas.getContext('2d');
-  canvas.width = W;
-  canvas.height = H;
+// tile: 0 empty, 1 brick, 2 steel, 3 water, 4 base
+var G=[], state=0; // 0 menu, 1 play, 2 over, 3 win, 4 pause
+var pl=null, ens=[], pb=[], eb=[], fx=[];
+var sc=0, lv=1, li=3, spN=0, spT=0, spMax=0, bAlive=true;
+var K={};
 
-  /* ===== STATE ===== */
-  var state = 'menu';
-  var map = [], player = null, enemies = [];
-  var pBullets = [], eBullets = [];
-  var explosions = [], particles = [];
-  var score=0, lives=3, level=1;
-  var totalE=0, spawned=0, spawnTmr=0;
-  var maxOnField=4, baseAlive=true;
-  var keys = {};
-
-  /* ===== LEVELS ===== */
-  var LEVELS = [
-    [ // Level 1
-      "                          ",
-      "  BB  BB  BB    BB  BB  BB",
-      "  BB  BB  BB    BB  BB  BB",
-      "  BB  BB        BB  BB    ",
-      "      BB  BBBB  BB        ",
-      "  SS      BBBB      SS    ",
-      "  SS  BB        BB  SS    ",
-      "      BB  BBBB  BB        ",
-      "  BB  BB  BBBB  BB  BB    ",
-      "  BB  BB        BB  BB    ",
-      "      BB    SS  BB        ",
-      "  BB      SS      BB      ",
-      "  BB  BB  SS  BB  BB      ",
-      "          SS              ",
-      "  BB  BB      BB  BB      ",
-      "  BB  BB  BB  BB  BB      ",
-      "              BB          ",
-      "  BB  BB  BB      BB      ",
-      "  BB  BB  BB  BB  BB      ",
-      "      BB      BB          ",
-      "  BB  BB  BB  BB  BB      ",
-      "  BB          BB  BB      ",
-      "      BB  BB              ",
-      "  BB  BB  BB  BBBB  BB    ",
-      "  BB          BBBB  BB    ",
-      "          BB      BB      ",
-    ],
-    [ // Level 2
-      "                          ",
-      "  BB  SS  BB    BB  SS  BB",
-      "  BB  SS  BB    BB  SS  BB",
-      "      SS      WW          ",
-      "  BB    BBBBWWBBBB    BB  ",
-      "  BB    BBBBWWBBBB    BB  ",
-      "          WW  WW          ",
-      "  BBBBWW      WWBBBB      ",
-      "  BBBBWW  SS  WWBBBB      ",
-      "          SS              ",
-      "      BB  SS  BB          ",
-      "  WW  BB  SS  BB  WW      ",
-      "  WW  BB      BB  WW      ",
-      "              BB          ",
-      "  BB  BBBB  BBBB  BB      ",
-      "  BB  BBBB  BBBB  BB      ",
-      "          BB              ",
-      "  SS  BB  BB  BB  SS      ",
-      "  SS  BB      BB  SS      ",
-      "      BB  BB              ",
-      "  BB  BB  BB  BB  BB      ",
-      "  BB          BB  BB      ",
-      "      BB  SS  BB          ",
-      "  BB  BB  SS  BB  BB      ",
-      "  BB          BB  BB      ",
-      "          BB              ",
-    ],
-    [ // Level 3
-      "                          ",
-      "  SSBBBBSS    SSBBBBSS    ",
-      "  SSBBBBSS    SSBBBBSS    ",
-      "      WW    WW            ",
-      "  BB  WWBBBBWWBB  BB      ",
-      "  BB  WWBBBBWWBB  BB      ",
-      "      BB    BB            ",
-      "  SSSSBBBBBBBBSSSS        ",
-      "  SSSSBBBBBBBBSSSS        ",
-      "          BB              ",
-      "  BBBBWW  BB  WWBBBB      ",
-      "  BBBBWW      WWBBBB      ",
-      "      WW  SS  WW          ",
-      "  BB  BB  SS  BB  BB      ",
-      "  BB  BB  SS  BB  BB      ",
-      "          SS              ",
-      "  WWBBBB      BBBBWW      ",
-      "  WWBBBB  BB  BBBBWW      ",
-      "          BB              ",
-      "  BB  SSSSSSSSSS  BB      ",
-      "  BB  SSSSSSSSSS  BB      ",
-      "          BB              ",
-      "  BBBB  WWBBWW  BBBB      ",
-      "  BBBB  WWBBWW  BBBB      ",
-      "          BBBB            ",
-      "          BBBB            ",
-    ],
+// generate map for level L
+function genMap(L){
+  G=[];
+  for(var r=0;r<N;r++){G[r]=[];for(var q=0;q<N;q++)G[r][q]=0;}
+  // brick patterns
+  var pats=[
+    // classic blocks
+    [3,3],[3,6],[3,9],[3,14],[3,17],[3,20],
+    [6,3],[6,9],[6,14],[6,20],
+    [9,6],[9,9],[9,14],[9,17],
+    [12,3],[12,6],[12,9],[12,14],[12,17],[12,20],
+    [15,3],[15,9],[15,14],[15,20],
+    [18,3],[18,6],[18,9],[18,14],[18,17],[18,20],
+    [21,3],[21,9],[21,14],[21,20],
   ];
+  for(var i=0;i<pats.length;i++){
+    var r=pats[i][0],q=pats[i][1];
+    G[r][q]=1;G[r][q+1]=1;G[r+1][q]=1;G[r+1][q+1]=1;
+  }
+  // steel at corners for level >=2
+  if(L>=2){
+    var sp=[[5,5],[5,18],[20,5],[20,18]];
+    for(var j=0;j<sp.length;j++){G[sp[j][0]][sp[j][1]]=2;G[sp[j][0]][sp[j][1]+1]=2;}
+  }
+  // water barriers for level >=3
+  if(L>=3){
+    var wp=[[10,11],[10,12],[13,11],[13,12]];
+    for(var k=0;k<wp.length;k++)G[wp[k][0]][wp[k][1]]=3;
+  }
+  // base at bottom center
+  var bx=12,by=23;
+  G[by][bx]=4;G[by][bx+1]=4;G[by+1][bx]=4;G[by+1][bx+1]=4;
+  // walls around base
+  for(var rr=by-1;rr<=by+2;rr++)for(var cc=bx-1;cc<=bx+2;cc++){
+    if(rr>=0&&rr<N&&cc>=0&&cc<N&&G[rr][cc]===0&&(rr===by-1||rr===by+2||cc===bx-1||cc===bx+2))G[rr][cc]=1;
+  }
+}
 
-  /* ===== LOAD MAP ===== */
-  function loadLevel(n) {
-    var layout = LEVELS[(n-1) % LEVELS.length];
-    map = [];
-    for (var r=0; r<ROWS; r++) {
-      map[r] = [];
-      for (var c=0; c<COLS; c++) {
-        var ch = (layout[r] && layout[r][c]) || ' ';
-        if (ch==='B') map[r][c]=BRICK;
-        else if (ch==='S') map[r][c]=STEEL;
-        else if (ch==='W') map[r][c]=WATER;
-        else if (ch==='T') map[r][c]=TREE;
-        else map[r][c]=EMPTY;
-      }
+// tank object
+function mkTank(x,y,d,t){
+  return{x:x,y:y,d:d,t:t, // d:0up 1right 2down 3left
+    sp:t==='p'?2.0:t==='f'?2.2:1.2,
+    hp:t==='a'?3:1,
+    cd:0,rt:t==='f'?20:t==='p'?12:35,
+    bs:t==='f'?5:4,
+    sz:T*2-4,
+    alive:true,aiD:d,aiT:0,fl:0};
+}
+function tcx(tk){return tk.x+T;}
+function tcy(tk){return tk.y+T;}
+
+function hit(ax,ay,aw,ah,bx,by,bw,bh){
+  return ax<bx+bw&&ax+aw>bx&&ay<by+bh&&ay+ah>by;
+}
+function tile(px,py){
+  var q=Math.floor(px/T),r=Math.floor(py/T);
+  if(r<0||r>=N||q<0||q>=N)return 2;
+  return G[r][q];
+}
+function canMv(tk,dx,dy){
+  var nx=tk.x+dx,ny=tk.y+dy,s=tk.sz;
+  if(nx<0||ny<0||nx+s>N*T||ny+s>N*T)return false;
+  var mg=3;
+  var ps=[[nx+mg,ny+mg],[nx+s-mg,ny+mg],[nx+mg,ny+s-mg],[nx+s-mg,ny+s-mg]];
+  for(var i=0;i<ps.length;i++){
+    var tt=tile(ps[i][0],ps[i][1]);
+    if(tt===1||tt===2||tt===3||tt===4)return false;
+  }
+  // vs other tanks
+  var rx={x:nx,y:ny,w:s,h:s};
+  if(tk.t==='p'){
+    for(var j=0;j<ens.length;j++){
+      if(ens[j].alive&&hit(nx,ny,s,s,ens[j].x,ens[j].y,ens[j].sz,ens[j].sz))return false;
     }
-    // Base
-    var bx = Math.floor(COLS/2)-1, by = ROWS-2;
-    map[by][bx]=BASE; map[by][bx+1]=BASE;
-    map[by+1][bx]=BASE; map[by+1][bx+1]=BASE;
-    // Walls around base
-    for (var rr=by-1; rr<=by+2; rr++) {
-      for (var cc=bx-1; cc<=bx+2; cc++) {
-        if (rr>=0&&rr<ROWS&&cc>=0&&cc<COLS && map[rr][cc]===EMPTY) {
-          if (rr===by-1||rr===by+2||cc===bx-1||cc===bx+2) map[rr][cc]=BRICK;
+  }else{
+    if(pl&&pl.alive&&hit(nx,ny,s,s,pl.x,pl.y,pl.sz,pl.sz))return false;
+    for(var k=0;k<ens.length;k++){
+      if(ens[k]!==tk&&ens[k].alive&&hit(nx,ny,s,s,ens[k].x,ens[k].y,ens[k].sz,ens[k].sz))return false;
+    }
+  }
+  return true;
+}
+function mv(tk,dir){
+  tk.d=dir;
+  var dx=0,dy=0;
+  if(dir===0)dy=-tk.sp;else if(dir===1)dx=tk.sp;else if(dir===2)dy=tk.sp;else dx=-tk.sp;
+  if(canMv(tk,dx,dy)){tk.x+=dx;tk.y+=dy;}
+  else{if(dx!==0)tk.y=Math.round(tk.y/12)*12;if(dy!==0)tk.x=Math.round(tk.x/12)*12;}
+}
+function shoot(tk){
+  if(tk.cd>0)return;tk.cd=tk.rt;
+  var bs=6,bx,by;
+  if(tk.d===0){bx=tcx(tk)-bs/2;by=tk.y-bs;}
+  else if(tk.d===1){bx=tk.x+tk.sz+2;by=tcy(tk)-bs/2;}
+  else if(tk.d===2){bx=tcx(tk)-bs/2;by=tk.y+tk.sz+2;}
+  else{bx=tk.x-bs-2;by=tcy(tk)-bs/2;}
+  var bl={x:bx,y:by,d:tk.d,s:tk.bs,o:tk,sz:bs};
+  if(tk.t==='p')pb.push(bl);else eb.push(bl);
+}
+
+function addFx(x,y,sz){
+  fx.push({x:x,y:y,sz:sz,fr:0,mx:18});
+  for(var i=0;i<6;i++){
+    var a=Math.random()*6.28,sp=Math.random()*2+1;
+    fx.push({x:x,y:y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,
+      sz:Math.random()*3+1,lf:15+Math.random()*10,isP:1,
+      cl:['#ff0','#fa0','#f50','#f00'][Math.floor(Math.random()*4)]});
+  }
+}
+
+function updBl(arr){
+  for(var i=arr.length-1;i>=0;i--){
+    var b=arr[i],dx=0,dy=0;
+    if(b.d===0)dy=-b.s;else if(b.d===1)dx=b.s;else if(b.d===2)dy=b.s;else dx=-b.s;
+    b.x+=dx;b.y+=dy;
+    if(b.x<-5||b.y<-5||b.x>N*T+5||b.y>N*T+5){arr.splice(i,1);continue;}
+    var ht=false;
+    // tile hit
+    var bq=Math.floor(b.x/T),br=Math.floor(b.y/T);
+    if(br>=0&&br<N&&bq>=0&&bq<N){
+      if(G[br][bq]===1){G[br][bq]=0;addFx(bq*T+T/2,br*T+T/2,10);ht=true;}
+      else if(G[br][bq]===2){addFx(b.x,b.y,6);ht=true;}
+      else if(G[br][bq]===4){G[br][bq]=0;bAlive=false;addFx(bq*T+T/2,br*T+T/2,25);ht=true;}
+    }
+    // bullet vs bullet
+    var ot=arr===pb?eb:pb;
+    for(var j=ot.length-1;j>=0;j--){
+      if(hit(b.x,b.y,b.sz,b.sz,ot[j].x,ot[j].y,ot[j].sz,ot[j].sz)){ot.splice(j,1);ht=true;break;}
+    }
+    // bullet vs tank
+    if(b.o.t==='p'){
+      for(var ei=0;ei<ens.length;ei++){
+        var e=ens[ei];if(!e.alive)continue;
+        if(hit(b.x,b.y,b.sz,b.sz,e.x,e.y,e.sz,e.sz)){
+          e.hp--;e.fl=5;
+          if(e.hp<=0){e.alive=false;addFx(tcx(e),tcy(e),25);sc+=e.t==='a'?300:e.t==='f'?200:100;}
+          else addFx(b.x,b.y,8);ht=true;break;
         }
       }
-    }
-  }
-
-  /* ===== DRAW STAR (no emoji) ===== */
-  function drawStar(cx, cy, r1, r2, pts, color) {
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    for (var i=0; i<pts*2; i++) {
-      var r = (i%2===0) ? r1 : r2;
-      var a = Math.PI * i / pts - Math.PI/2;
-      var x = cx + Math.cos(a)*r, y = cy + Math.sin(a)*r;
-      if (i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
-    }
-    ctx.closePath();
-    ctx.fill();
-  }
-
-  /* ===== TANK ===== */
-  function Tank(x, y, dir, type) {
-    this.x=x; this.y=y; this.dir=dir; this.type=type;
-    this.speed = type==='fast'?2.0 : type==='player'?1.8 : 1.1;
-    this.hp = type==='armor'?3 : 1;
-    this.shootCD = 0;
-    this.shootRate = type==='fast'?25 : type==='player'?15 : 40;
-    this.bullSpd = type==='fast'?5 : 4;
-    this.size = TILE*2-4;
-    this.alive = true;
-    this.aiDir = dir;
-    this.aiTmr = 0;
-    this.flash = 0;
-  }
-  Tank.prototype.cx = function() { return this.x+TILE; };
-  Tank.prototype.cy = function() { return this.y+TILE; };
-  Tank.prototype.draw = function() {
-    if (!this.alive) return;
-    var x=this.x, y=this.y, s=this.size;
-    var bc, tc;
-    if (this.type==='player') { bc=this.flash>0?'#FFF':'#FFD700'; tc='#DAA520'; }
-    else if (this.type==='fast') { bc='#00CED1'; tc='#008B8B'; }
-    else if (this.type==='armor') { bc=this.flash>0?'#FFF':'#CC3333'; tc='#FF4500'; }
-    else { bc='#C0C0C0'; tc='#888'; }
-
-    // Tracks
-    ctx.fillStyle='#333';
-    if (this.dir===0||this.dir===2) {
-      ctx.fillRect(x+2,y+4,6,s-8);
-      ctx.fillRect(x+s-8,y+4,6,s-8);
-    } else {
-      ctx.fillRect(x+4,y+2,s-8,6);
-      ctx.fillRect(x+4,y+s-8,s-8,6);
-    }
-    // Body
-    ctx.fillStyle=bc;
-    ctx.fillRect(x+6,y+6,s-12,s-12);
-    // Inner
-    ctx.fillStyle=tc;
-    ctx.fillRect(x+10,y+10,s-20,s-20);
-    // Barrel
-    var cx=x+s/2, cy2=y+s/2, bl=s/2-2, bw=4;
-    if (this.dir===0) ctx.fillRect(cx-bw/2,y+2,bw,bl);
-    else if (this.dir===1) ctx.fillRect(cx+s/2-bl,cy2-bw/2,bl,bw);
-    else if (this.dir===2) ctx.fillRect(cx-bw/2,cy2+2,bw,bl);
-    else ctx.fillRect(x+2,cy2-bw/2,bl,bw);
-    // HP
-    if (this.type==='armor'&&this.hp>1) {
-      ctx.fillStyle='#FF0'; ctx.font='bold 12px monospace';
-      ctx.fillText('x'+this.hp, x+s/2-6, y-3);
-    }
-    if (this.flash>0) this.flash--;
-  };
-  Tank.prototype.shoot = function() {
-    if (this.shootCD>0) return;
-    this.shootCD = this.shootRate;
-    var bs=6, bx, by;
-    if (this.dir===0) { bx=this.cx()-bs/2; by=this.y-bs; }
-    else if (this.dir===1) { bx=this.x+this.size+2; by=this.cy()-bs/2; }
-    else if (this.dir===2) { bx=this.cx()-bs/2; by=this.y+this.size+2; }
-    else { bx=this.x-bs-2; by=this.cy()-bs/2; }
-    var blt = {x:bx,y:by,dir:this.dir,speed:this.bullSpd,size:bs,owner:this};
-    if (this.type==='player') pBullets.push(blt); else eBullets.push(blt);
-  };
-
-  /* ===== COLLISION ===== */
-  function rCollide(a,b) {
-    return a.x<b.x+b.w && a.x+a.w>b.x && a.y<b.y+b.h && a.y+a.h>b.y;
-  }
-  function tileAt(px,py) {
-    var c=Math.floor(px/TILE), r=Math.floor(py/TILE);
-    if (r<0||r>=ROWS||c<0||c>=COLS) return STEEL;
-    return map[r][c];
-  }
-  function canMove(tk,dx,dy) {
-    var nx=tk.x+dx, ny=tk.y+dy, s=tk.size;
-    if (nx<0||ny<0||nx+s>W||ny+s>H) return false;
-    var m=2;
-    var pts=[[nx+m,ny+m],[nx+s-m,ny+m],[nx+m,ny+s-m],[nx+s-m,ny+s-m]];
-    for (var i=0;i<pts.length;i++) {
-      var t=tileAt(pts[i][0],pts[i][1]);
-      if (t===BRICK||t===STEEL||t===WATER||t===BASE) return false;
-    }
-    // tank-tank
-    var rect={x:nx,y:ny,w:s,h:s};
-    if (tk.type==='player') {
-      for (var j=0;j<enemies.length;j++) {
-        if (enemies[j].alive && rCollide(rect,{x:enemies[j].x,y:enemies[j].y,w:enemies[j].size,h:enemies[j].size})) return false;
-      }
-    } else {
-      if (player&&player.alive&&rCollide(rect,{x:player.x,y:player.y,w:player.size,h:player.size})) return false;
-      for (var k=0;k<enemies.length;k++) {
-        if (enemies[k]!==tk&&enemies[k].alive&&rCollide(rect,{x:enemies[k].x,y:enemies[k].y,w:enemies[k].size,h:enemies[k].size})) return false;
+    }else{
+      if(pl&&pl.alive&&hit(b.x,b.y,b.sz,b.sz,pl.x,pl.y,pl.sz,pl.sz)){
+        pl.hp--;pl.fl=8;
+        if(pl.hp<=0){pl.alive=false;addFx(tcx(pl),tcy(pl),25);}
+        else addFx(b.x,b.y,8);ht=true;
       }
     }
-    return true;
+    if(ht)arr.splice(i,1);
   }
-  function moveTank(tk,dir) {
-    tk.dir=dir;
-    var dx=0,dy=0;
-    if (dir===0) dy=-tk.speed;
-    else if (dir===1) dx=tk.speed;
-    else if (dir===2) dy=tk.speed;
-    else dx=-tk.speed;
-    if (canMove(tk,dx,dy)) { tk.x+=dx; tk.y+=dy; }
-    else {
-      if (dx!==0) tk.y=Math.round(tk.y/(TILE/2))*(TILE/2);
-      if (dy!==0) tk.x=Math.round(tk.x/(TILE/2))*(TILE/2);
-    }
-  }
+}
 
-  /* ===== BULLETS ===== */
-  function updateBullets(arr) {
-    for (var i=arr.length-1; i>=0; i--) {
-      var b=arr[i], dx=0, dy=0;
-      if (b.dir===0) dy=-b.speed;
-      else if (b.dir===1) dx=b.speed;
-      else if (b.dir===2) dy=b.speed;
-      else dx=-b.speed;
-      b.x+=dx; b.y+=dy;
-      if (b.x<0||b.y<0||b.x>W||b.y>H) { arr.splice(i,1); continue; }
+function drawStar(cx,cy,r1,r2,pts){
+  c.beginPath();
+  for(var i=0;i<pts*2;i++){
+    var r=i%2===0?r1:r2,a=Math.PI*i/pts-Math.PI/2;
+    var x=cx+Math.cos(a)*r,y=cy+Math.sin(a)*r;
+    if(i===0)c.moveTo(x,y);else c.lineTo(x,y);
+  }
+  c.closePath();c.fill();
+}
 
-      var hit=false;
-      var bpts=[[b.x,b.y],[b.x+b.size,b.y],[b.x,b.y+b.size],[b.x+b.size,b.y+b.size]];
-      for (var pi=0;pi<bpts.length;pi++) {
-        var col=Math.floor(bpts[pi][0]/TILE), row=Math.floor(bpts[pi][1]/TILE);
-        if (row>=0&&row<ROWS&&col>=0&&col<COLS) {
-          var t=map[row][col];
-          if (t===BRICK) { map[row][col]=EMPTY; boom(col*TILE+TILE/2,row*TILE+TILE/2,12); hit=true; }
-          else if (t===STEEL) { boom(b.x,b.y,8); hit=true; }
-          else if (t===BASE) { map[row][col]=EMPTY; baseAlive=false; boom(col*TILE+TILE/2,row*TILE+TILE/2,30); hit=true; }
-        }
-      }
-      // bullet-bullet
-      var other = arr===pBullets ? eBullets : pBullets;
-      for (var j=other.length-1;j>=0;j--) {
-        if (rCollide({x:b.x,y:b.y,w:b.size,h:b.size},{x:other[j].x,y:other[j].y,w:other[j].size,h:other[j].size})) {
-          other.splice(j,1); hit=true; break;
-        }
-      }
-      // hit tank
-      if (b.owner.type==='player') {
-        for (var ei=0;ei<enemies.length;ei++) {
-          var e=enemies[ei];
-          if (!e.alive) continue;
-          if (rCollide({x:b.x,y:b.y,w:b.size,h:b.size},{x:e.x,y:e.y,w:e.size,h:e.size})) {
-            e.hp--; e.flash=6;
-            if (e.hp<=0) { e.alive=false; boom(e.cx(),e.cy(),30); score+=e.type==='armor'?300:e.type==='fast'?200:100; }
-            else boom(b.x,b.y,10);
-            hit=true; break;
-          }
-        }
-      } else {
-        if (player&&player.alive&&rCollide({x:b.x,y:b.y,w:b.size,h:b.size},{x:player.x,y:player.y,w:player.size,h:player.size})) {
-          player.hp--; player.flash=10;
-          if (player.hp<=0) { player.alive=false; boom(player.cx(),player.cy(),30); }
-          else boom(b.x,b.y,10);
-          hit=true;
-        }
-      }
-      if (hit) arr.splice(i,1);
+function drawMap(){
+  for(var r=0;r<N;r++)for(var q=0;q<N;q++){
+    var x=q*T,y=r*T,t=G[r][q];
+    if(t===1){// brick
+      c.fillStyle='#8B4513';c.fillRect(x,y,T,T);
+      c.fillStyle='#A0522D';c.fillRect(x+1,y+1,10,10);c.fillRect(x+12,y+12,11,11);
+    }else if(t===2){// steel
+      c.fillStyle='#999';c.fillRect(x,y,T,T);
+      c.fillStyle='#ccc';c.fillRect(x+2,y+2,T-4,T-4);
+      c.fillStyle='#777';c.fillRect(x+7,y+7,4,4);
+    }else if(t===3){// water
+      c.fillStyle='#15f';c.fillRect(x,y,T,T);
+      c.fillStyle='rgba(255,255,255,0.15)';
+      c.fillRect(x+2,y+4,10,2);c.fillRect(x+12,y+12,8,2);c.fillRect(x+4,y+18,10,2);
+    }else if(t===4){// base
+      c.fillStyle=bAlive?'#fc0':'#555';c.fillRect(x+2,y+2,T-4,T-4);
+      if(bAlive){c.fillStyle='#fff';drawStar(x+T/2,y+T/2,7,3,5);}
     }
   }
+}
 
-  /* ===== EXPLOSIONS ===== */
-  var boomColors = ['#FF0','#FFA500','#FF4500','#F00','#8B0000'];
-  function boom(x,y,sz) {
-    explosions.push({x:x,y:y,sz:sz,fr:0,max:20});
-    for (var i=0;i<8;i++) {
-      var a=Math.random()*Math.PI*2, sp=Math.random()*2+1;
-      particles.push({x:x,y:y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,
-        life:Math.random()*20+10, color:boomColors[Math.floor(Math.random()*5)],
-        sz:Math.random()*3+1});
-    }
-  }
-  function updateFx() {
-    for (var i=explosions.length-1;i>=0;i--) {
-      explosions[i].fr++;
-      if (explosions[i].fr>=explosions[i].max) explosions.splice(i,1);
-    }
-    for (var j=particles.length-1;j>=0;j--) {
-      var p=particles[j]; p.x+=p.vx; p.y+=p.vy; p.life--;
-      if (p.life<=0) particles.splice(j,1);
-    }
-  }
-  function drawFx() {
-    for (var i=0;i<explosions.length;i++) {
-      var e=explosions[i], prog=e.fr/e.max;
-      var r=e.sz*(1-prog)*(0.5+0.5*Math.sin(prog*Math.PI));
-      ctx.globalAlpha=1-prog;
-      ctx.fillStyle=boomColors[Math.min(Math.floor(prog*5),4)];
-      ctx.beginPath(); ctx.arc(e.x,e.y,Math.max(r,1),0,Math.PI*2); ctx.fill();
-    }
-    for (var j=0;j<particles.length;j++) {
-      var p=particles[j];
-      ctx.globalAlpha=Math.max(p.life/30,0);
-      ctx.fillStyle=p.color;
-      ctx.fillRect(p.x-p.sz/2,p.y-p.sz/2,p.sz,p.sz);
-    }
-    ctx.globalAlpha=1;
-  }
+function drawTank(tk){
+  if(!tk.alive)return;
+  var x=tk.x,y=tk.y,s=tk.sz;
+  var bc,tc;
+  if(tk.t==='p'){bc=tk.fl>0?'#fff':'#fc0';tc='#da0';}
+  else if(tk.t==='f'){bc='#0ee';tc='#088';}
+  else if(tk.t==='a'){bc=tk.fl>0?'#fff':'#c33';tc='#f50';}
+  else{bc='#bbb';tc='#777';}
+  // tracks
+  c.fillStyle='#333';
+  if(tk.d===0||tk.d===2){c.fillRect(x+2,y+4,6,s-8);c.fillRect(x+s-8,y+4,6,s-8);}
+  else{c.fillRect(x+4,y+2,s-8,6);c.fillRect(x+4,y+s-8,s-8,6);}
+  // body
+  c.fillStyle=bc;c.fillRect(x+6,y+6,s-12,s-12);
+  // turret
+  c.fillStyle=tc;c.fillRect(x+10,y+10,s-20,s-20);
+  // barrel
+  var cx=x+s/2,cy=y+s/2,bl=s/2,bw=5;
+  c.fillStyle=tc;
+  if(tk.d===0)c.fillRect(cx-bw/2,y,bw,bl);
+  else if(tk.d===1)c.fillRect(cx,cy-bw/2,bl,bw);
+  else if(tk.d===2)c.fillRect(cx-bw/2,cy,bw,bl);
+  else c.fillRect(x,cy-bw/2,bl,bw);
+  // flash
+  if(tk.fl>0)tk.fl--;
+}
 
-  /* ===== DRAW MAP ===== */
-  function drawMap() {
-    for (var r=0;r<ROWS;r++) {
-      for (var c=0;c<COLS;c++) {
-        var x=c*TILE, y=r*TILE, t=map[r][c];
-        if (t===BRICK) {
-          ctx.fillStyle='#8B4513'; ctx.fillRect(x,y,TILE,TILE);
-          ctx.fillStyle='#A0522D';
-          ctx.fillRect(x+1,y+1,TILE/2-1,TILE/2-1);
-          ctx.fillRect(x+TILE/2,y+TILE/2,TILE/2,TILE/2);
-        } else if (t===STEEL) {
-          ctx.fillStyle='#A8A8A8'; ctx.fillRect(x,y,TILE,TILE);
-          ctx.fillStyle='#D0D0D0'; ctx.fillRect(x+2,y+2,TILE-4,TILE-4);
-          ctx.fillStyle='#666'; ctx.fillRect(x+6,y+6,4,4);
-        } else if (t===WATER) {
-          ctx.fillStyle='#1E90FF'; ctx.fillRect(x,y,TILE,TILE);
-          ctx.fillStyle='rgba(255,255,255,0.15)';
-          var now = Date.now();
-          for (var wi=0;wi<3;wi++) {
-            var wx = x+(now/200+wi*8+r*5)%TILE;
-            ctx.fillRect(wx,y+wi*8,8,2);
-          }
-        } else if (t===BASE) {
-          ctx.fillStyle=baseAlive?'#FFD700':'#555';
-          ctx.fillRect(x+2,y+2,TILE-4,TILE-4);
-          if (baseAlive) drawStar(x+TILE/2, y+TILE/2, 8, 4, 5, '#FFF');
-        }
-      }
+function drawFx(){
+  for(var i=fx.length-1;i>=0;i--){
+    var f=fx[i];
+    if(f.isP){
+      f.x+=f.vx;f.y+=f.vy;f.lf--;
+      c.globalAlpha=Math.max(f.lf/20,0);c.fillStyle=f.cl;
+      c.fillRect(f.x-f.sz/2,f.y-f.sz/2,f.sz,f.sz);
+      if(f.lf<=0)fx.splice(i,1);
+    }else{
+      f.fr++;var p=f.fr/f.mx;
+      var r=f.sz*(1-p)*Math.sin(p*Math.PI);
+      c.globalAlpha=1-p;c.fillStyle=['#ff0','#fa0','#f50','#f00','#800'][Math.min(4,Math.floor(p*5))];
+      c.beginPath();c.arc(f.x,f.y,Math.max(r,1),0,6.28);c.fill();
+      if(f.fr>=f.mx)fx.splice(i,1);
     }
   }
-  function drawTrees() {
-    for (var r=0;r<ROWS;r++) {
-      for (var c=0;c<COLS;c++) {
-        if (map[r][c]===TREE) {
-          ctx.fillStyle='#228B22'; ctx.fillRect(c*TILE,r*TILE,TILE,TILE);
-          ctx.fillStyle='#006400';
-          ctx.fillRect(c*TILE+4,r*TILE+4,6,6);
-          ctx.fillRect(c*TILE+14,r*TILE+10,6,6);
-        }
-      }
+  c.globalAlpha=1;
+}
+
+function spEnemy(){
+  if(spN>=lv*8+6)return;
+  var ps=[[0,0],[12*T-T,0],[24*T,0]];
+  for(var i=0;i<ps.length;i++){
+    var px=ps[i][0],py=ps[i][1],ok=true;
+    if(pl&&pl.alive&&hit(px,py,T*2,T*2,pl.x,pl.y,pl.sz,pl.sz))ok=false;
+    for(var j=0;j<ens.length;j++){
+      if(ens[j].alive&&hit(px,py,T*2,T*2,ens[j].x,ens[j].y,ens[j].sz,ens[j].sz))ok=false;
+    }
+    if(ok){
+      var ts=['b','b','f','a'],tp=ts[Math.floor(Math.random()*ts.length)];
+      ens.push(mkTank(px,py,2,tp));spN++;addFx(px+T,py+T,12);return;
     }
   }
+}
 
-  /* ===== AI ===== */
-  function updateAI(e) {
-    if (!e.alive) return;
-    e.aiTmr--;
-    if (e.aiTmr<=0) {
-      if (Math.random()<0.35 && player && player.alive) {
-        var dx=player.cx()-e.cx(), dy=player.cy()-e.cy();
-        e.aiDir = Math.abs(dx)>Math.abs(dy) ? (dx>0?1:3) : (dy>0?2:0);
-      } else {
-        e.aiDir = Math.floor(Math.random()*4);
-      }
-      e.aiTmr = Math.floor(Math.random()*60)+30;
-    }
-    moveTank(e, e.aiDir);
-    if (Math.random()<0.03) e.shoot();
+function aiUpd(e){
+  if(!e.alive)return;
+  e.aiT--;
+  if(e.aiT<=0){
+    if(Math.random()<0.3&&pl&&pl.alive){
+      var dx=tcx(pl)-tcx(e),dy=tcy(pl)-tcy(e);
+      e.aiD=Math.abs(dx)>Math.abs(dy)?(dx>0?1:3):(dy>0?2:0);
+    }else e.aiD=Math.floor(Math.random()*4);
+    e.aiT=20+Math.floor(Math.random()*40);
   }
+  mv(e,e.aiD);
+  if(Math.random()<0.03)shoot(e);
+}
 
-  /* ===== SPAWN ===== */
-  function spawnPlayer() {
-    var px = Math.floor(COLS/2)*TILE-TILE;
-    player = new Tank(px,(ROWS-2)*TILE,0,'player');
+function initLv(){
+  genMap(lv);
+  ens=[];pb=[];eb=[];fx=[];bAlive=true;
+  spN=0;spT=0;spMax=3+Math.min(lv,3);
+  pl=mkTank(12*T-T,22*T,0,'p');
+}
+
+function update(){
+  if(state!==1)return;
+  // player
+  if(pl&&pl.alive){
+    if(K.ArrowUp||K.KeyW)mv(pl,0);
+    else if(K.ArrowRight||K.KeyD)mv(pl,1);
+    else if(K.ArrowDown||K.KeyS)mv(pl,2);
+    else if(K.ArrowLeft||K.KeyA)mv(pl,3);
+    if(K.Space)shoot(pl);
+    if(pl.cd>0)pl.cd--;
   }
-  function spawnEnemy() {
-    if (spawned>=totalE) return;
-    var sps=[{x:0,y:0},{x:Math.floor(COLS/2)*TILE-TILE,y:0},{x:(COLS-2)*TILE,y:0}];
-    for (var si=0;si<sps.length;si++) {
-      var sp=sps[si], blocked=false;
-      if (player&&player.alive&&rCollide({x:sp.x,y:sp.y,w:TILE*2,h:TILE*2},{x:player.x,y:player.y,w:player.size,h:player.size})) blocked=true;
-      for (var ei=0;ei<enemies.length;ei++) {
-        if (enemies[ei].alive&&rCollide({x:sp.x,y:sp.y,w:TILE*2,h:TILE*2},{x:enemies[ei].x,y:enemies[ei].y,w:enemies[ei].size,h:enemies[ei].size})) blocked=true;
-      }
-      if (!blocked) {
-        var types=['basic','basic','fast','armor'];
-        var tp=types[Math.floor(Math.random()*types.length)];
-        var ne=new Tank(sp.x,sp.y,2,tp);
-        enemies.push(ne); spawned++;
-        boom(sp.x+TILE,sp.y+TILE,15);
-        return;
-      }
-    }
+  // enemies
+  var al=0;
+  for(var i=0;i<ens.length;i++){
+    if(ens[i].alive){aiUpd(ens[i]);if(ens[i].cd>0)ens[i].cd--;al++;}
   }
+  // spawn
+  spT--;
+  if(spT<=0&&al<spMax&&spN<lv*8+6){spEnemy();spT=Math.max(40,100-lv*10);}
+  // bullets
+  updBl(pb);updBl(eb);
+  // explosions
+  // (drawn in drawFx)
+  // player death
+  if(pl&&!pl.alive){li--;if(li<=0){state=2;showMsg('over');}else pl=mkTank(12*T-T,22*T,0,'p');}
+  // base
+  if(!bAlive){state=2;showMsg('over');}
+  // win
+  if(spN>=lv*8+6&&al===0&&bAlive){lv++;if(lv>3){state=3;showMsg('win');}else initLv();}
+  // hud
+  document.getElementById('hLv').textContent=lv;
+  document.getElementById('hSc').textContent=sc;
+  document.getElementById('hLi').textContent=li;
+  document.getElementById('hEn').textContent=Math.max(0,lv*8+6-spN+al);
+}
 
-  /* ===== INIT ===== */
-  function initLevel() {
-    loadLevel(level);
-    enemies=[]; pBullets=[]; eBullets=[];
-    explosions=[]; particles=[];
-    baseAlive=true;
-    totalE=10+(level-1)*4;
-    spawned=0; spawnTmr=0;
-    maxOnField=3+Math.min(level,3);
-    spawnPlayer();
+function draw(){
+  c.fillStyle='#000';c.fillRect(0,0,cv.width,cv.height);
+  drawMap();
+  for(var i=0;i<ens.length;i++)drawTank(ens[i]);
+  if(pl)drawTank(pl);
+  // bullets
+  c.fillStyle='#fff';
+  for(var i=0;i<pb.length;i++){var b=pb[i];c.fillRect(b.x,b.y,b.sz,b.sz);}
+  c.fillStyle='#f88';
+  for(var j=0;j<eb.length;j++){var d=eb[j];c.fillRect(d.x,d.y,d.sz,d.sz);}
+  drawFx();
+  // paused
+  if(state===4){
+    c.fillStyle='rgba(0,0,0,0.7)';c.fillRect(0,0,cv.width,cv.height);
+    c.fillStyle='#fff';c.font='bold 36px monospace';c.textAlign='center';
+    c.fillText('暂停',cv.width/2,cv.height/2);
+    c.font='18px monospace';c.fillText('按 P 继续',cv.width/2,cv.height/2+40);
+    c.textAlign='start';
   }
+}
 
-  /* ===== UPDATE ===== */
-  function update() {
-    if (state!=='playing') return;
-    // Player
-    if (player&&player.alive) {
-      if (keys['ArrowUp']||keys['KeyW']) moveTank(player,0);
-      else if (keys['ArrowRight']||keys['KeyD']) moveTank(player,1);
-      else if (keys['ArrowDown']||keys['KeyS']) moveTank(player,2);
-      else if (keys['ArrowLeft']||keys['KeyA']) moveTank(player,3);
-      if (keys['Space']) player.shoot();
-      if (player.shootCD>0) player.shootCD--;
-    }
-    // Enemies
-    var alive=enemies.filter(function(e){return e.alive;});
-    for (var i=0;i<alive.length;i++) {
-      updateAI(alive[i]);
-      if (alive[i].shootCD>0) alive[i].shootCD--;
-    }
-    // Spawn
-    spawnTmr--;
-    if (spawnTmr<=0 && alive.length<maxOnField && spawned<totalE) {
-      spawnEnemy(); spawnTmr=Math.max(60,120-level*10);
-    }
-    // Bullets
-    updateBullets(pBullets);
-    updateBullets(eBullets);
-    // Fx
-    updateFx();
-    // Player death
-    if (player&&!player.alive) {
-      lives--;
-      if (lives<=0) { state='gameover'; showOvl('gameover'); }
-      else spawnPlayer();
-    }
-    // Base
-    if (!baseAlive) { state='gameover'; showOvl('gameover'); }
-    // Win
-    if (spawned>=totalE && alive.length===0 && baseAlive) {
-      level++;
-      if (level>LEVELS.length) { state='win'; showOvl('win'); }
-      else initLevel();
-    }
-    // HUD
-    document.getElementById('hudLevel').textContent=level;
-    document.getElementById('hudScore').textContent=score;
-    document.getElementById('hudLives').textContent=lives;
-    document.getElementById('hudEnemies').textContent=totalE-spawned+alive.length;
+var msgEl=document.getElementById('msg');
+function showMsg(t){
+  msgEl.classList.remove('hidden');
+  if(t==='over')msgEl.innerHTML='<h1 style="color:#f44">游戏结束</h1><p>得分: '+sc+' | 关卡: '+lv+'</p><p class="go">点击重新开始</p>';
+  else if(t==='win')msgEl.innerHTML='<h1 style="color:#0f0">恭喜通关!</h1><p>最终得分: '+sc+'</p><p class="go">点击再来一局</p>';
+  else msgEl.innerHTML='<h1>坦克大战</h1><p>[方向键/WASD] 移动 &nbsp; [空格] 射击 &nbsp; [P] 暂停</p><p class="go">点击开始游戏</p>';
+}
+function go(){
+  if(state===0||state===2||state===3){
+    state=1;sc=0;li=3;lv=1;initLv();msgEl.classList.add('hidden');
   }
+}
 
-  /* ===== DRAW ===== */
-  function draw() {
-    ctx.fillStyle='#000';
-    ctx.fillRect(0,0,W,H);
-    drawMap();
-    for (var i=0;i<enemies.length;i++) enemies[i].draw();
-    if (player) player.draw();
-    drawTrees();
-    drawFx();
-    // Player bullets
-    ctx.fillStyle='#FFF';
-    for (var pi=0;pi<pBullets.length;pi++) {
-      var pb=pBullets[pi];
-      ctx.fillRect(pb.x,pb.y,pb.size,pb.size);
-      ctx.fillStyle='#FF0';
-      ctx.fillRect(pb.x+1,pb.y+1,pb.size-2,pb.size-2);
-      ctx.fillStyle='#FFF';
-    }
-    // Enemy bullets
-    ctx.fillStyle='#F88';
-    for (var ei=0;ei<eBullets.length;ei++) {
-      var eb=eBullets[ei];
-      ctx.fillRect(eb.x,eb.y,eb.size,eb.size);
-    }
-    // Paused
-    if (state==='paused') {
-      ctx.fillStyle='rgba(0,0,0,0.6)';
-      ctx.fillRect(0,0,W,H);
-      ctx.fillStyle='#FFF';
-      ctx.font='bold 32px Microsoft YaHei, monospace';
-      ctx.textAlign='center';
-      ctx.fillText('暂停',W/2,H/2);
-      ctx.font='18px Microsoft YaHei, monospace';
-      ctx.fillText('按 P 继续',W/2,H/2+35);
-      ctx.textAlign='start';
-    }
-  }
+document.addEventListener('keydown',function(e){
+  K[e.code]=true;
+  if(e.code==='Enter')go();
+  if(e.code==='KeyP'){if(state===1)state=4;else if(state===4)state=1;}
+  if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].indexOf(e.code)>=0)e.preventDefault();
+});
+document.addEventListener('keyup',function(e){K[e.code]=false;});
 
-  /* ===== OVERLAY ===== */
-  var overlay = document.getElementById('overlay');
-  function showOvl(type) {
-    overlay.classList.remove('hidden');
-    if (type==='menu') {
-      overlay.innerHTML='<h1>坦克大战</h1><p>TANK BATTLE</p>'
-        +'<div class="ctrl"><p>[ 方向键 / WASD ] 移动</p><p>[ 空格键 ] 射击</p><p>[ P ] 暂停</p></div>'
-        +'<p class="hint">点击开始 / 按 ENTER</p>';
-    } else if (type==='gameover') {
-      overlay.innerHTML='<h2 style="color:#f44">游戏结束</h2>'
-        +'<p>得分: '+score+'</p><p>关卡: '+level+'</p>'
-        +'<p class="hint">点击重新开始 / 按 ENTER</p>';
-    } else if (type==='win') {
-      overlay.innerHTML='<h2 style="color:#0f0">恭喜通关!</h2>'
-        +'<p>最终得分: '+score+'</p>'
-        +'<p class="hint">点击再来一局 / 按 ENTER</p>';
-    }
-  }
-  function hideOvl() { overlay.classList.add('hidden'); }
-  function startGame() {
-    if (state==='menu'||state==='gameover'||state==='win') {
-      state='playing'; score=0; lives=3; level=1;
-      initLevel(); hideOvl();
-    }
-  }
-
-  // Click to start
-  overlay.addEventListener('click', function(e) { startGame(); e.stopPropagation(); });
-
-  /* ===== INPUT ===== */
-  document.addEventListener('keydown', function(e) {
-    keys[e.code]=true;
-    if (e.code==='Enter') startGame();
-    if (e.code==='KeyP') {
-      if (state==='playing') state='paused';
-      else if (state==='paused') state='playing';
-    }
-    if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].indexOf(e.code)>=0) e.preventDefault();
-  });
-  document.addEventListener('keyup', function(e) { keys[e.code]=false; });
-
-  /* ===== LOOP ===== */
-  function loop() {
-    update();
-    draw();
-    requestAnimationFrame(loop);
-  }
-  loop();
-
-  console.log('Tank Battle loaded OK. State:', state);
-
-})();
+(function loop(){update();draw();requestAnimationFrame(loop);})();
 </script>
 </body>
 </html>
