@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>Test</title></head>
+<body style="background:#000">
+<canvas id="cv" width="400" height="400" style="border:2px solid #fff"></canvas>
+<script>
+var cv = document.getElementById('cv');
+var c = cv.getContext('2d');
+// red background
+c.fillStyle = '#f00';
+c.fillRect(0, 0, 400, 400);
+// green square
+c.fillStyle = '#0f0';
+c.fillRect(50, 50, 100, 100);
+// white text
+c.fillStyle = '#fff';
+c.font = '30px monospace';
+c.fillText('CANVAS OK!', 100, 200);
+alert('canvas test: context=' + (c ? 'OK' : 'NULL'));
+</script>
+</body>
+</html>
