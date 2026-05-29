@@ -1,8 +1,8 @@
 <!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>坦克大战</title>
 <style>
-body{background:#000;margin:0;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;font-family:monospace;color:#fff}
-canvas{border:3px solid #555}
+body{background:#000;margin:0;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;font-family:monospace;color:#fff;user-select:none}
+canvas{border:3px solid #555;cursor:crosshair}
 #hud{color:#ff0;font-size:16px;margin:6px}
 #m{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.92);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:9;cursor:pointer}
 #m.hide{display:none}
@@ -14,32 +14,21 @@ canvas{border:3px solid #555}
 <canvas id="cv" width="624" height="624"></canvas>
 <div id="m">
 <h1 style="color:#fc0;font-size:44px">坦克大战</h1>
-<p style="color:#aaa">方向键/WASD移动 空格射击 P暂停</p>
+<p style="color:#aaa">方向键/WASD 移动 &nbsp; 鼠标瞄准 点击射击</p>
 <p class="go">点击开始 / 按回车</p>
 </div>
 <script>
-// ========== CORE ==========
-var cv = document.getElementById('cv');
-var C = cv.getContext('2d');
-var T = 24;      // tile size
-var NC = 26;     // number of columns
-var NR = 26;     // number of rows
-var W = NC * T;  // 624
-var H = NR * T;  // 624
+var cv=document.getElementById('cv');
+var C=cv.getContext('2d');
+var T=24,NC=26,NR=26,W=624,H=624;
+var M=new Array(NC*NR);
+function gm(r,c){return M[r*NC+c]}
+function sm(r,c,v){M[r*NC+c]=v}
 
-// ========== MAP as 1D array ==========
-// index = r * NC + c
-var M = new Array(NC * NR);
-
-function gm(r, c) { return M[r * NC + c]; }
-function sm(r, c, v) { M[r * NC + c] = v; }
-
-function buildMap(level) {
-  var i, r, c;
-  // fill empty
-  for (i = 0; i < NC * NR; i++) M[i] = 0;
-  // bricks (2x2 blocks)
-  var bricks = [
+function buildMap(lv){
+  var i,r,c;
+  for(i=0;i<NC*NR;i++)M[i]=0;
+  var bricks=[
     [2,2],[2,5],[2,8],[2,15],[2,18],[2,21],
     [5,2],[5,8],[5,15],[5,21],
     [8,5],[8,8],[8,15],[8,18],
@@ -48,322 +37,264 @@ function buildMap(level) {
     [17,2],[17,5],[17,8],[17,15],[17,18],[17,21],
     [20,2],[20,8],[20,15],[20,21]
   ];
-  for (i = 0; i < bricks.length; i++) {
-    r = bricks[i][0]; c = bricks[i][1];
-    sm(r,c,1); sm(r,c+1,1); sm(r+1,c,1); sm(r+1,c+1,1);
-  }
-  // steel (level 2+)
-  if (level >= 2) {
-    var steel = [[4,4],[4,19],[19,4],[19,19]];
-    for (i = 0; i < steel.length; i++) {
-      r = steel[i][0]; c = steel[i][1];
-      sm(r,c,2); sm(r,c+1,2);
-    }
-  }
-  // water (level 3)
-  if (level >= 3) {
-    var water = [[10,11],[10,12],[13,11],[13,12]];
-    for (i = 0; i < water.length; i++) sm(water[i][0], water[i][1], 3);
-  }
-  // base (eagle) at bottom center
-  sm(23,12,4); sm(23,13,4); sm(24,12,4); sm(24,13,4);
-  // walls around base
-  for (r = 22; r <= 25; r++) {
-    for (c = 11; c <= 14; c++) {
-      if (r >= 0 && r < NR && c >= 0 && c < NC) {
-        if (gm(r,c) === 0 && (r === 22 || r === 25 || c === 11 || c === 14)) {
-          sm(r, c, 1);
-        }
-      }
+  for(i=0;i<bricks.length;i++){r=bricks[i][0];c=bricks[i][1];sm(r,c,1);sm(r,c+1,1);sm(r+1,c,1);sm(r+1,c+1,1)}
+  if(lv>=2){var s=[[4,4],[4,19],[19,4],[19,19]];for(i=0;i<s.length;i++){r=s[i][0];c=s[i][1];sm(r,c,2);sm(r,c+1,2)}}
+  if(lv>=3){var w=[[10,11],[10,12],[13,11],[13,12]];for(i=0;i<w.length;i++)sm(w[i][0],w[i][1],3)}
+  // base
+  sm(23,12,4);sm(23,13,4);sm(24,12,4);sm(24,13,4);
+  // walls around base - use STEEL on bottom & sides for protection
+  for(r=22;r<=25;r++)for(c=11;c<=14;c++){
+    if(r<0||r>=NR||c<0||c>=NC)continue;
+    if(gm(r,c)===0){
+      if(r===22||c===11||c===14)sm(r,c,1); // brick top & sides
+      if(r===25)sm(r,c,2); // steel bottom
     }
   }
 }
 
-// ========== GAME STATE ==========
-var state = 0; // 0=menu, 1=play, 2=over, 3=win, 4=pause
-var sc = 0, lv = 1, li = 3;
-var pX, pY, pD, pAlive, pCD, pFlash;
-var enms = [], pBul = [], eBul = [], fx = [];
-var spN = 0, spT = 0;
-var K = {};
+// ========== STATE ==========
+var state=0,sc=0,lv=1,li=3;
+var pX,pY,pAlive,pCD,pFlash;
+var pAngle=0; // aim angle in radians
+var enms=[],pBul=[],eBul=[],fx=[];
+var spN=0,spT=0;
+var K={};
+var mouseX=W/2,mouseY=H/2;
 
-function initLv(l) {
+function initLv(l){
   buildMap(l);
-  pX = 264; pY = 528; pD = 0; pAlive = true; pCD = 0; pFlash = 0;
-  enms = []; pBul = []; eBul = []; fx = [];
-  spN = 0; spT = 0;
+  pX=120;pY=504;pAlive=true;pCD=0;pFlash=0;pAngle=-Math.PI/2;
+  enms=[];pBul=[];eBul=[];fx=[];spN=0;spT=0;
 }
 
 // ========== COLLISION ==========
-function isBlocked(x, y) {
-  var pts = [[x+5,y+5],[x+39,y+5],[x+5,y+39],[x+39,y+39]];
-  var i, c, r, v;
-  for (i = 0; i < 4; i++) {
-    c = Math.floor(pts[i][0] / T);
-    r = Math.floor(pts[i][1] / T);
-    if (r < 0 || r >= NR || c < 0 || c >= NC) return true;
-    v = gm(r, c);
-    if (v === 1 || v === 2 || v === 3 || v === 4) return true;
-  }
+function isBlocked(x,y){
+  var pts=[[x+5,y+5],[x+39,y+5],[x+5,y+39],[x+39,y+39]];
+  var i,c,r,v;
+  for(i=0;i<4;i++){c=Math.floor(pts[i][0]/T);r=Math.floor(pts[i][1]/T);if(r<0||r>=NR||c<0||c>=NC)return true;v=gm(r,c);if(v===1||v===2||v===3||v===4)return true}
   return false;
 }
 
-function hitbox(ax, ay, bx, by) {
-  return ax < bx+44 && ax+44 > bx && ay < by+44 && ay+44 > by;
-}
-
 // ========== ENEMY ==========
-function addEnemy() {
-  var spots = [[0,0],[264,0],[528,0]];
-  var i, j, sx, sy, ok, tp;
-  for (i = 0; i < 3; i++) {
-    sx = spots[i][0]; sy = spots[i][1]; ok = true;
-    for (j = 0; j < enms.length; j++) {
-      if (enms[j].a && hitbox(sx, sy, enms[j].x, enms[j].y)) { ok = false; break; }
-    }
-    if (pAlive && hitbox(sx, sy, pX, pY)) ok = false;
-    if (ok) {
-      tp = [1,1,2,3][Math.floor(Math.random()*4)];
-      enms.push({x:sx, y:sy, d:2, tp:tp, sp:tp===2?1.8:1.0, hp:tp===3?3:1,
-                  a:true, aiD:2, aiT:0, fl:0, cd:0});
-      fx.push({x:sx+22, y:sy+22, t:0, mx:12, sz:10});
-      return;
-    }
+function addEnemy(){
+  var spots=[[0,0],[264,0],[528,0]];
+  var i,j,sx,sy,ok,tp;
+  for(i=0;i<3;i++){sx=spots[i][0];sy=spots[i][1];ok=true;
+    for(j=0;j<enms.length;j++){if(enms[j].a&&sx<enms[j].x+44&&sx+44>enms[j].x&&sy<enms[j].y+44&&sy+44>enms[j].y){ok=false;break}}
+    if(pAlive&&sx<pX+44&&sx+44>pX&&sy<pY+44&&sy+44>pY)ok=false;
+    if(ok){tp=[1,1,2,3][Math.floor(Math.random()*4)];
+      enms.push({x:sx,y:sy,d:2,tp:tp,sp:tp===2?1.5:0.9,hp:tp===3?3:1,a:true,aiD:2,aiT:0,fl:0,cd:0});return}
   }
 }
 
 // ========== SHOOT ==========
-function fire(x, y, d, arr) {
-  var bx, by;
-  if (d === 0) { bx = x + 20; by = y - 4; }
-  else if (d === 1) { bx = x + 44; by = y + 20; }
-  else if (d === 2) { bx = x + 20; by = y + 44; }
-  else { bx = x - 4; by = y + 20; }
-  arr.push({x:bx, y:by, d:d});
+function firePlayer(){
+  if(pCD>0)return;
+  pCD=15;
+  var bx=pX+22+Math.cos(pAngle)*24;
+  var by=pY+22+Math.sin(pAngle)*24;
+  pBul.push({x:bx,y:by,a:pAngle,sp:5});
+}
+function fireEnemy(e){
+  if(e.cd>0)return;
+  e.cd=40;
+  var bx,by;
+  if(e.d===0){bx=e.x+20;by=e.y-4}else if(e.d===1){bx=e.x+44;by=e.y+20}
+  else if(e.d===2){bx=e.x+20;by=e.y+44}else{bx=e.x-4;by=e.y+20}
+  eBul.push({x:bx,y:by,d:e.d});
 }
 
 // ========== UPDATE ==========
-function update() {
-  if (state !== 1) return;
-  var i, j, r, c, v, b, e2, nx, ny, edx, edy;
+function update(){
+  if(state!==1)return;
+  var i,j,r,c,v,b,nx,ny;
 
-  // -- Player move --
-  if (pAlive) {
-    var spd = 2;
-    pD = (K.ArrowUp||K.KeyW) ? 0 : (K.ArrowDown||K.KeyS) ? 2 : (K.ArrowLeft||K.KeyA) ? 3 : (K.ArrowRight||K.KeyD) ? 1 : pD;
-    if (K.ArrowUp||K.KeyW) { if (!isBlocked(pX, pY - spd)) pY -= spd; }
-    else if (K.ArrowDown||K.KeyS) { if (!isBlocked(pX, pY + spd)) pY += spd; }
-    else if (K.ArrowLeft||K.KeyA) { if (!isBlocked(pX - spd, pY)) pX -= spd; }
-    else if (K.ArrowRight||K.KeyD) { if (!isBlocked(pX + spd, pY)) pX += spd; }
-    if (K.Space && pCD <= 0) { fire(pX, pY, pD, pBul); pCD = 12; }
-    if (pCD > 0) pCD--;
-    if (pFlash > 0) pFlash--;
-  }
-
-  // -- Enemies --
-  var alv = 0;
-  for (i = 0; i < enms.length; i++) {
-    e = enms[i];
-    if (!e.a) continue;
-    alv++;
-    e.aiT--;
-    if (e.aiT <= 0) { e.aiD = Math.floor(Math.random()*4); e.aiT = 25 + Math.floor(Math.random()*40); }
-    edx = 0; edy = 0;
-    if (e.aiD === 0) edy = -e.sp; else if (e.aiD === 1) edx = e.sp;
-    else if (e.aiD === 2) edy = e.sp; else edx = -e.sp;
-    nx = e.x + edx; ny = e.y + edy;
-    if (nx >= 0 && ny >= 0 && nx+44 <= W && ny+44 <= H && !isBlocked(nx, ny)) {
-      e.x = nx; e.y = ny; e.d = e.aiD;
-    } else { e.aiD = Math.floor(Math.random()*4); }
-    if (Math.random() < 0.02) fire(e.x, e.y, e.d, eBul);
-    if (e.cd > 0) e.cd--;
-    if (e.fl > 0) e.fl--;
-  }
-
-  // -- Spawn --
-  spT--;
-  var maxE = 3 + Math.min(lv, 3);
-  var totalE = lv * 8 + 4;
-  if (spT <= 0 && alv < maxE && spN < totalE) { addEnemy(); spN++; spT = 80; }
-
-  // -- Player bullets --
-  for (i = pBul.length - 1; i >= 0; i--) {
-    b = pBul[i];
-    if (b.d===0) b.y-=5; else if (b.d===1) b.x+=5; else if (b.d===2) b.y+=5; else b.x-=5;
-    if (b.x<-5||b.y<-5||b.x>W+5||b.y>H+5) { pBul.splice(i,1); continue; }
-    var ht = false;
-    c = Math.floor(b.x / T); r = Math.floor(b.y / T);
-    if (r >= 0 && r < NR && c >= 0 && c < NC) {
-      v = gm(r, c);
-      if (v === 1) { sm(r,c,0); fx.push({x:c*T+12, y:r*T+12, t:0, mx:12, sz:10}); ht = true; }
-      else if (v === 2) { fx.push({x:b.x, y:b.y, t:0, mx:8, sz:6}); ht = true; }
-      else if (v === 4) { sm(r,c,0); fx.push({x:c*T+12, y:r*T+12, t:0, mx:18, sz:22}); pAlive = false; li = 0; ht = true; }
-    }
-    for (j = 0; j < enms.length; j++) {
-      e2 = enms[j]; if (!e2.a) continue;
-      if (b.x > e2.x && b.x < e2.x+44 && b.y > e2.y && b.y < e2.y+44) {
-        e2.hp--; e2.fl = 5;
-        if (e2.hp <= 0) { e2.a = false; sc += e2.tp===3?300 : e2.tp===2?200 : 100; fx.push({x:e2.x+22, y:e2.y+22, t:0, mx:16, sz:22}); }
-        else fx.push({x:b.x, y:b.y, t:0, mx:8, sz:6});
-        ht = true; break;
-      }
-    }
-    if (ht) pBul.splice(i, 1);
-  }
-
-  // -- Enemy bullets --
-  for (i = eBul.length - 1; i >= 0; i--) {
-    b = eBul[i];
-    if (b.d===0) b.y-=4; else if (b.d===1) b.x+=4; else if (b.d===2) b.y+=4; else b.x-=4;
-    if (b.x<-5||b.y<-5||b.x>W+5||b.y>H+5) { eBul.splice(i,1); continue; }
-    ht = false;
-    c = Math.floor(b.x / T); r = Math.floor(b.y / T);
-    if (r >= 0 && r < NR && c >= 0 && c < NC) {
-      v = gm(r, c);
-      if (v === 1) { sm(r,c,0); fx.push({x:c*T+12, y:r*T+12, t:0, mx:10, sz:10}); ht = true; }
-      else if (v === 2) { fx.push({x:b.x, y:b.y, t:0, mx:6, sz:5}); ht = true; }
-      else if (v === 4) { sm(r,c,0); fx.push({x:c*T+12, y:r*T+12, t:0, mx:18, sz:22}); pAlive = false; li = 0; ht = true; }
-    }
-    if (pAlive && b.x > pX && b.x < pX+44 && b.y > pY && b.y < pY+44) {
-      li--; pFlash = 10;
-      if (li <= 0) { pAlive = false; fx.push({x:pX+22, y:pY+22, t:0, mx:18, sz:22}); }
-      else fx.push({x:b.x, y:b.y, t:0, mx:8, sz:6});
-      ht = true;
-    }
-    if (ht) eBul.splice(i, 1);
-  }
-
-  // -- FX --
-  for (i = fx.length - 1; i >= 0; i--) { fx[i].t++; if (fx[i].t >= fx[i].mx) fx.splice(i, 1); }
-
-  // -- Respawn --
-  if (!pAlive && li > 0) { pX = 264; pY = 528; pD = 0; pAlive = true; pFlash = 20; }
-
-  // -- Game over --
-  if (!pAlive && li <= 0) { state = 2; showMsg(); return; }
-  var bOk = gm(23,12)===4 || gm(23,13)===4 || gm(24,12)===4 || gm(24,13)===4;
-  if (!bOk) { state = 2; showMsg(); return; }
-
-  // -- Win --
-  if (spN >= totalE && alv === 0) { lv++; if (lv > 3) { state = 3; showMsg(); } else initLv(lv); }
-
-  // -- HUD --
-  document.getElementById('hL').textContent = lv;
-  document.getElementById('hS').textContent = sc;
-  document.getElementById('hH').textContent = li;
-}
-
-// ========== DRAW ==========
-function draw() {
-  C.fillStyle = '#000';
-  C.fillRect(0, 0, W, H);
-
-  var r, c, x, y, v, i, e, f, p, ec, tc;
-
-  // Map
-  for (r = 0; r < NR; r++) {
-    for (c = 0; c < NC; c++) {
-      x = c * T; y = r * T;
-      v = gm(r, c);
-      if (v === 1) {
-        C.fillStyle = '#8B4513'; C.fillRect(x, y, T, T);
-        C.fillStyle = '#A0522D'; C.fillRect(x+1, y+1, 10, 10); C.fillRect(x+12, y+12, 11, 11);
-      } else if (v === 2) {
-        C.fillStyle = '#888'; C.fillRect(x, y, T, T);
-        C.fillStyle = '#ccc'; C.fillRect(x+2, y+2, T-4, T-4);
-        C.fillStyle = '#666'; C.fillRect(x+7, y+7, 4, 4);
-      } else if (v === 3) {
-        C.fillStyle = '#15f'; C.fillRect(x, y, T, T);
-        C.fillStyle = 'rgba(255,255,255,0.15)';
-        C.fillRect(x+3, y+5, 8, 2); C.fillRect(x+10, y+15, 8, 2);
-      } else if (v === 4) {
-        C.fillStyle = '#fc0'; C.fillRect(x+2, y+2, T-4, T-4);
-        C.fillStyle = '#fff'; C.font = 'bold 16px serif';
-        C.fillText('★', x+4, y+18);
-      }
-    }
-  }
-
-  // Player
-  if (pAlive) {
-    C.fillStyle = pFlash > 0 ? '#fff' : '#fc0';
-    C.fillRect(pX+3, pY+3, 38, 38);
-    C.fillStyle = '#b90'; C.fillRect(pX+9, pY+9, 26, 26);
-    C.fillStyle = '#fc0';
-    if (pD === 0) C.fillRect(pX+19, pY, 6, 22);
-    else if (pD === 1) C.fillRect(pX+22, pY+19, 22, 6);
-    else if (pD === 2) C.fillRect(pX+19, pY+22, 6, 22);
-    else C.fillRect(pX, pY+19, 22, 6);
+  // Player move
+  if(pAlive){
+    var spd=2;
+    if(K.ArrowUp||K.KeyW){if(!isBlocked(pX,pY-spd))pY-=spd}
+    if(K.ArrowDown||K.KeyS){if(!isBlocked(pX,pY+spd))pY+=spd}
+    if(K.ArrowLeft||K.KeyA){if(!isBlocked(pX-spd,pY))pX-=spd}
+    if(K.ArrowRight||K.KeyD){if(!isBlocked(pX+spd,pY))pX+=spd}
+    // aim toward mouse
+    pAngle=Math.atan2(mouseY-(pY+22),mouseX-(pX+22));
+    if(pCD>0)pCD--;
+    if(pFlash>0)pFlash--;
   }
 
   // Enemies
-  for (i = 0; i < enms.length; i++) {
-    e = enms[i]; if (!e.a) continue;
-    ec = e.tp===1 ? '#aaa' : e.tp===2 ? '#0cc' : '#c33';
-    tc = e.tp===1 ? '#666' : e.tp===2 ? '#077' : '#f50';
-    C.fillStyle = e.fl > 0 ? '#fff' : ec;
-    C.fillRect(e.x+3, e.y+3, 38, 38);
-    C.fillStyle = tc; C.fillRect(e.x+9, e.y+9, 26, 26);
-    if (e.d === 0) C.fillRect(e.x+19, e.y, 6, 22);
-    else if (e.d === 1) C.fillRect(e.x+22, e.y+19, 22, 6);
-    else if (e.d === 2) C.fillRect(e.x+19, e.y+22, 6, 22);
-    else C.fillRect(e.x, e.y+19, 22, 6);
-    if (e.tp === 3 && e.hp > 1) {
-      C.fillStyle = '#ff0'; C.font = 'bold 11px monospace';
-      C.fillText('x' + e.hp, e.x+15, e.y-2);
+  var alv=0;
+  for(i=0;i<enms.length;i++){
+    var e=enms[i];if(!e.a)continue;alv++;
+    e.aiT--;
+    if(e.aiT<=0){e.aiD=Math.floor(Math.random()*4);e.aiT=30+Math.floor(Math.random()*50)}
+    var edx=0,edy=0;
+    if(e.aiD===0)edy=-e.sp;else if(e.aiD===1)edx=e.sp;else if(e.aiD===2)edy=e.sp;else edx=-e.sp;
+    nx=e.x+edx;ny=e.y+edy;
+    if(nx>=0&&ny>=0&&nx+44<=W&&ny+44<=H&&!isBlocked(nx,ny)){e.x=nx;e.y=ny;e.d=e.aiD}
+    else e.aiD=Math.floor(Math.random()*4);
+    if(Math.random()<0.015)fireEnemy(e);
+    if(e.cd>0)e.cd--;
+    if(e.fl>0)e.fl--;
+  }
+
+  // Spawn
+  spT--;
+  var maxE=2+Math.min(lv,2);
+  var totalE=lv*6+4;
+  if(spT<=0&&alv<maxE&&spN<totalE){addEnemy();spN++;spT=120}
+
+  // Player bullets (angle-based)
+  for(i=pBul.length-1;i>=0;i--){
+    b=pBul[i];
+    b.x+=Math.cos(b.a)*b.sp;
+    b.y+=Math.sin(b.a)*b.sp;
+    if(b.x<-5||b.y<-5||b.x>W+5||b.y>H+5){pBul.splice(i,1);continue}
+    var ht=false;
+    c=Math.floor(b.x/T);r=Math.floor(b.y/T);
+    if(r>=0&&r<NR&&c>=0&&c<NC){v=gm(r,c);
+      if(v===1){sm(r,c,0);fx.push({x:c*T+12,y:r*T+12,t:0,mx:12,sz:10});ht=true}
+      else if(v===2){fx.push({x:b.x,y:b.y,t:0,mx:8,sz:6});ht=true}
+      else if(v===4){sm(r,c,0);fx.push({x:c*T+12,y:r*T+12,t:0,mx:18,sz:22});pAlive=false;li=0;ht=true}
     }
+    for(j=0;j<enms.length;j++){var e2=enms[j];if(!e2.a)continue;
+      if(b.x>e2.x&&b.x<e2.x+44&&b.y>e2.y&&b.y<e2.y+44){
+        e2.hp--;e2.fl=5;
+        if(e2.hp<=0){e2.a=false;sc+=e2.tp===3?300:e2.tp===2?200:100;fx.push({x:e2.x+22,y:e2.y+22,t:0,mx:16,sz:22})}
+        else fx.push({x:b.x,y:b.y,t:0,mx:8,sz:6});
+        ht=true;break}}
+    if(ht)pBul.splice(i,1)
   }
 
-  // Bullets
-  C.fillStyle = '#ff0';
-  for (i = 0; i < pBul.length; i++) { C.fillRect(pBul[i].x-2, pBul[i].y-2, 5, 5); }
-  C.fillStyle = '#f66';
-  for (i = 0; i < eBul.length; i++) { C.fillRect(eBul[i].x-2, eBul[i].y-2, 5, 5); }
-
-  // Explosions
-  for (i = 0; i < fx.length; i++) {
-    f = fx[i]; p = f.t / f.mx;
-    C.globalAlpha = 1 - p;
-    C.fillStyle = ['#ff0','#fa0','#f50','#f00'][Math.min(3, Math.floor(p*4))];
-    C.beginPath(); C.arc(f.x, f.y, Math.max(f.sz * (1-p), 1), 0, 6.28); C.fill();
+  // Enemy bullets
+  for(i=eBul.length-1;i>=0;i--){
+    b=eBul[i];
+    if(b.d===0)b.y-=3;else if(b.d===1)b.x+=3;else if(b.d===2)b.y+=3;else b.x-=3;
+    if(b.x<-5||b.y<-5||b.x>W+5||b.y>H+5){eBul.splice(i,1);continue}
+    ht=false;
+    c=Math.floor(b.x/T);r=Math.floor(b.y/T);
+    if(r>=0&&r<NR&&c>=0&&c<NC){v=gm(r,c);
+      if(v===1){sm(r,c,0);fx.push({x:c*T+12,y:r*T+12,t:0,mx:10,sz:10});ht=true}
+      else if(v===2){fx.push({x:b.x,y:b.y,t:0,mx:6,sz:5});ht=true}
+      else if(v===4){sm(r,c,0);fx.push({x:c*T+12,y:r*T+12,t:0,mx:18,sz:22});pAlive=false;li=0;ht=true}
+    }
+    if(pAlive&&b.x>pX&&b.x<pX+44&&b.y>pY&&b.y<pY+44){
+      li--;pFlash=10;
+      if(li<=0){pAlive=false;fx.push({x:pX+22,y:pY+22,t:0,mx:18,sz:22})}
+      else fx.push({x:b.x,y:b.y,t:0,mx:8,sz:6});
+      ht=true}
+    if(ht)eBul.splice(i,1)
   }
-  C.globalAlpha = 1;
 
-  // Pause
-  if (state === 4) {
-    C.fillStyle = 'rgba(0,0,0,0.7)'; C.fillRect(0, 0, W, H);
-    C.fillStyle = '#fff'; C.font = 'bold 36px monospace'; C.textAlign = 'center';
-    C.fillText('暂停', 312, 300); C.fillText('按P继续', 312, 350);
-    C.textAlign = 'start';
+  // FX
+  for(i=fx.length-1;i>=0;i--){fx[i].t++;if(fx[i].t>=fx[i].mx)fx.splice(i,1)}
+
+  // Respawn
+  if(!pAlive&&li>0){pX=120;pY=504;pAlive=true;pFlash=30}
+
+  // Game over
+  if(!pAlive&&li<=0){state=2;showMsg();return}
+  var bOk=gm(23,12)===4||gm(23,13)===4||gm(24,12)===4||gm(24,13)===4;
+  if(!bOk){state=2;showMsg();return}
+
+  // Win
+  if(spN>=totalE&&alv===0){lv++;if(lv>3){state=3;showMsg()}else initLv(lv)}
+
+  document.getElementById('hL').textContent=lv;
+  document.getElementById('hS').textContent=sc;
+  document.getElementById('hH').textContent=li;
+}
+
+// ========== DRAW ==========
+function draw(){
+  C.fillStyle='#000';C.fillRect(0,0,W,H);
+  var r,c,x,y,v,i,e,f,p;
+
+  for(r=0;r<NR;r++)for(c=0;c<NC;c++){
+    x=c*T;y=r*T;v=gm(r,c);
+    if(v===1){C.fillStyle='#8B4513';C.fillRect(x,y,T,T);C.fillStyle='#A0522D';C.fillRect(x+1,y+1,10,10);C.fillRect(x+12,y+12,11,11)}
+    else if(v===2){C.fillStyle='#888';C.fillRect(x,y,T,T);C.fillStyle='#ccc';C.fillRect(x+2,y+2,T-4,T-4);C.fillStyle='#666';C.fillRect(x+7,y+7,4,4)}
+    else if(v===3){C.fillStyle='#15f';C.fillRect(x,y,T,T);C.fillStyle='rgba(255,255,255,0.15)';C.fillRect(x+3,y+5,8,2);C.fillRect(x+10,y+15,8,2)}
+    else if(v===4){C.fillStyle='#fc0';C.fillRect(x+2,y+2,T-4,T-4);C.fillStyle='#fff';C.font='bold 16px serif';C.fillText('★',x+4,y+18)}
   }
+
+  // Player
+  if(pAlive){
+    var pcx=pX+22,pcy=pY+22;
+    C.fillStyle=pFlash>0?'#fff':'#fc0';
+    C.fillRect(pX+3,pY+3,38,38);
+    C.fillStyle='#b90';C.fillRect(pX+9,pY+9,26,26);
+    // barrel toward mouse
+    C.strokeStyle='#fc0';C.lineWidth=5;C.lineCap='round';
+    C.beginPath();C.moveTo(pcx,pcy);C.lineTo(pcx+Math.cos(pAngle)*24,pcy+Math.sin(pAngle)*24);C.stroke();
+    // crosshair
+    C.strokeStyle='rgba(255,255,255,0.4)';C.lineWidth=1;
+    C.beginPath();C.arc(mouseX,mouseY,8,0,6.28);C.stroke();
+    C.beginPath();C.moveTo(mouseX-12,mouseY);C.lineTo(mouseX+12,mouseY);C.stroke();
+    C.beginPath();C.moveTo(mouseX,mouseY-12);C.lineTo(mouseX,mouseY+12);C.stroke();
+  }
+
+  // Enemies
+  for(i=0;i<enms.length;i++){
+    e=enms[i];if(!e.a)continue;
+    var ec=e.tp===1?'#aaa':e.tp===2?'#0cc':'#c33';
+    var tc=e.tp===1?'#666':e.tp===2?'#077':'#f50';
+    C.fillStyle=e.fl>0?'#fff':ec;C.fillRect(e.x+3,e.y+3,38,38);
+    C.fillStyle=tc;C.fillRect(e.x+9,e.y+9,26,26);
+    if(e.d===0)C.fillRect(e.x+19,e.y,6,22);else if(e.d===1)C.fillRect(e.x+22,e.y+19,22,6);
+    else if(e.d===2)C.fillRect(e.x+19,e.y+22,6,22);else C.fillRect(e.x,e.y+19,22,6);
+    if(e.tp===3&&e.hp>1){C.fillStyle='#ff0';C.font='bold 11px monospace';C.fillText('x'+e.hp,e.x+15,e.y-2)}
+  }
+
+  // Player bullets
+  C.fillStyle='#ff0';
+  for(i=0;i<pBul.length;i++){C.beginPath();C.arc(pBul[i].x,pBul[i].y,3,0,6.28);C.fill()}
+
+  // Enemy bullets
+  C.fillStyle='#f66';
+  for(i=0;i<eBul.length;i++){C.fillRect(eBul[i].x-2,eBul[i].y-2,5,5)}
+
+  // FX
+  for(i=0;i<fx.length;i++){
+    f=fx[i];p=f.t/f.mx;
+    C.globalAlpha=1-p;C.fillStyle=['#ff0','#fa0','#f50','#f00'][Math.min(3,Math.floor(p*4))];
+    C.beginPath();C.arc(f.x,f.y,Math.max(f.sz*(1-p),1),0,6.28);C.fill()
+  }
+  C.globalAlpha=1;
+
+  if(state===4){C.fillStyle='rgba(0,0,0,0.7)';C.fillRect(0,0,W,H);C.fillStyle='#fff';C.font='bold 36px monospace';C.textAlign='center';C.fillText('暂停',312,300);C.fillText('按P继续',312,350);C.textAlign='start'}
 }
 
 // ========== UI ==========
-var msgEl = document.getElementById('m');
-function showMsg() {
+var msgEl=document.getElementById('m');
+function showMsg(){
   msgEl.classList.remove('hide');
-  if (state === 2) msgEl.innerHTML = '<h1 style="color:#f44;font-size:44px">游戏结束</h1><p style="color:#aaa">得分:'+sc+'</p><p class="go">点击重新开始</p>';
-  else if (state === 3) msgEl.innerHTML = '<h1 style="color:#0f0;font-size:44px">恭喜通关!</h1><p style="color:#aaa">得分:'+sc+'</p><p class="go">点击再来一局</p>';
+  if(state===2)msgEl.innerHTML='<h1 style="color:#f44;font-size:44px">游戏结束</h1><p style="color:#aaa">得分:'+sc+' 关卡:'+lv+'</p><p class="go">点击重新开始</p>';
+  else if(state===3)msgEl.innerHTML='<h1 style="color:#0f0;font-size:44px">恭喜通关!</h1><p style="color:#aaa">得分:'+sc+'</p><p class="go">点击再来一局</p>';
 }
-function start() {
-  if (state === 0 || state === 2 || state === 3) {
-    state = 1; sc = 0; li = 3; lv = 1;
-    initLv(1);
-    msgEl.classList.add('hide');
-  }
-}
-msgEl.addEventListener('click', start);
+function start(){if(state===0||state===2||state===3){state=1;sc=0;li=3;lv=1;initLv(1);msgEl.classList.add('hide')}}
+msgEl.addEventListener('click',start);
 
 // ========== INPUT ==========
-document.addEventListener('keydown', function(e) {
-  K[e.code] = true;
-  if (e.code === 'Enter') start();
-  if (e.code === 'KeyP') { if (state===1) state=4; else if (state===4) state=1; }
-  if (e.code.indexOf('Arrow') >= 0 || e.code === 'Space') e.preventDefault();
+window.addEventListener('keydown',function(e){
+  K[e.code]=true;
+  if(e.code==='Enter')start();
+  if(e.code==='KeyP'){if(state===1)state=4;else if(state===4)state=1}
+  if(e.code==='ArrowUp'||e.code==='ArrowDown'||e.code==='ArrowLeft'||e.code==='ArrowRight'||e.code==='Space')e.preventDefault();
+},true);
+window.addEventListener('keyup',function(e){K[e.code]=false},true);
+
+// Mouse
+cv.addEventListener('mousemove',function(e){
+  var rect=cv.getBoundingClientRect();
+  mouseX=(e.clientX-rect.left)*(W/rect.width);
+  mouseY=(e.clientY-rect.top)*(H/rect.height);
 });
-document.addEventListener('keyup', function(e) { K[e.code] = false; });
+cv.addEventListener('click',function(e){
+  if(state===1&&pAlive)firePlayer();
+});
 
 // ========== START ==========
 initLv(1);
-(function loop() { update(); draw(); requestAnimationFrame(loop); })();
+(function loop(){update();draw();requestAnimationFrame(loop)})();
 </script></body></html>
